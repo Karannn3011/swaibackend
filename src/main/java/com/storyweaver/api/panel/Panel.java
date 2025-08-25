@@ -28,4 +28,7 @@ public class Panel {
     @Column(name = "room_id")
     private UUID roomId;
 
+    @Column(name = "author_id") // ** ADD THIS LINE **
+    private UUID authorId;      // ** ADD THIS LINE **
+
 }

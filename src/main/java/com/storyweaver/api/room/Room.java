@@ -18,4 +18,10 @@ public class Room {
     @CreationTimestamp // Add this annotation
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
+
+    @Column(unique = true)
+    private String code;
+
+    @Column(name = "current_turn_user_id") // ** ADD THIS LINE **
+    private UUID currentTurnUserId;        // ** ADD THIS LINE **
 }

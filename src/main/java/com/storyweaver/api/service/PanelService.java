@@ -3,17 +3,23 @@ package com.storyweaver.api.service;
 import com.storyweaver.api.config.ApiConfig;
 import com.storyweaver.api.panel.Panel;
 import com.storyweaver.api.panel.PanelRepository;
+import com.storyweaver.api.room.Room;
+import com.storyweaver.api.room.RoomMembership;
+import com.storyweaver.api.room.RoomMembershipRepository;
+import com.storyweaver.api.room.RoomRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -21,40 +27,86 @@ public class PanelService {
 
     private static final Logger logger = LoggerFactory.getLogger(PanelService.class);
 
+    // These are the fields that need to be initialized
     private final PanelRepository panelRepository;
     private final ApiConfig apiConfig;
     private final RestTemplate restTemplate;
+    private final RoomRepository roomRepository;
+    private final RoomMembershipRepository roomMembershipRepository;
+    private final AuthHelper authHelper;
 
-    public PanelService(PanelRepository panelRepository, ApiConfig apiConfig, RestTemplateBuilder restTemplateBuilder) {
+    // This is the correct constructor
+    public PanelService(
+            PanelRepository panelRepository,
+            ApiConfig apiConfig,
+            RestTemplateBuilder restTemplateBuilder,
+            RoomRepository roomRepository,
+            RoomMembershipRepository roomMembershipRepository,
+            AuthHelper authHelper
+    ) {
         this.panelRepository = panelRepository;
         this.apiConfig = apiConfig;
         this.restTemplate = restTemplateBuilder
-                .connectTimeout(Duration.ofSeconds(60))
-                .readTimeout(Duration.ofSeconds(120))
+                .setConnectTimeout(Duration.ofSeconds(60))
+                .setReadTimeout(Duration.ofSeconds(120))
                 .build();
+        this.roomRepository = roomRepository;
+        this.roomMembershipRepository = roomMembershipRepository;
+        this.authHelper = authHelper;
     }
 
+    @Transactional // Ensures the whole method succeeds or fails together
     public Panel createPanel(String prompt, UUID roomId) {
-        logger.info("Generating image for prompt: '{}'", prompt);
+        UUID currentUserId = authHelper.getCurrentUserId();
+        Room room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new RuntimeException("Room not found"));
 
-        // Step 1: Get the image bytes from the Pollinations API
+        // 1. Check if it's the user's turn
+        if (!room.getCurrentTurnUserId().equals(currentUserId)) {
+            throw new RuntimeException("It's not your turn!");
+        }
+
+        // ... (image generation and upload logic remains the same)
         byte[] imageBytes = callPollinationsImageApi(prompt);
-        logger.info("Successfully received image bytes from Pollinations. Size: {} bytes", imageBytes.length);
-
-        // Step 2: Upload the image bytes directly to Supabase
         String imageUrl = uploadToSupabaseStorage(imageBytes, roomId);
-        logger.info("Image uploaded to Supabase Storage at URL: {}", imageUrl);
 
-        // Step 3: Save the panel metadata to the database
+        // 2. Create and save the new panel
         Panel newPanel = new Panel();
         newPanel.setPrompt(prompt);
         newPanel.setRoomId(roomId);
         newPanel.setImageUrl(imageUrl);
+        newPanel.setAuthorId(currentUserId);
         Panel savedPanel = panelRepository.save(newPanel);
 
-        logger.info("New panel with ID {} saved to the database.", savedPanel.getId());
+        // 3. Advance the turn to the next user
+        advanceTurn(room);
+
         return savedPanel;
     }
+
+    private void advanceTurn(Room room) {
+        List<RoomMembership> members = roomMembershipRepository.findByRoomIdOrderByJoinedAtAsc(room.getId());
+        if (members.size() <= 1) {
+            return; // Turn doesn't change if there's only one person
+        }
+
+        UUID currentTurnUserId = room.getCurrentTurnUserId();
+        int currentIndex = -1;
+        for (int i = 0; i < members.size(); i++) {
+            if (members.get(i).getUserId().equals(currentTurnUserId)) {
+                currentIndex = i;
+                break;
+            }
+        }
+
+        int nextIndex = (currentIndex + 1) % members.size();
+        UUID nextUserId = members.get(nextIndex).getUserId();
+
+        room.setCurrentTurnUserId(nextUserId);
+        roomRepository.save(room);
+        logger.info("Advanced turn in room {} to user {}", room.getId(), nextUserId);
+    }
+
 
     private byte[] callPollinationsImageApi(String prompt) {
         // The base URL for the Pollinations image generation API
