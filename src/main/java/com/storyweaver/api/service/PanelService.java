@@ -5,19 +5,14 @@ import com.storyweaver.api.panel.Panel;
 import com.storyweaver.api.panel.PanelRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.FileSystemResource;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.web.util.UriComponentsBuilder;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -42,24 +37,15 @@ public class PanelService {
     public Panel createPanel(String prompt, UUID roomId) {
         logger.info("Generating image for prompt: '{}'", prompt);
 
-        byte[] imageBytes = callHuggingFaceImageApi(prompt);
-        logger.info("Successfully received image bytes from Hugging Face. Size: {} bytes", imageBytes.length);
+        // Step 1: Get the image bytes from the Pollinations API
+        byte[] imageBytes = callPollinationsImageApi(prompt);
+        logger.info("Successfully received image bytes from Pollinations. Size: {} bytes", imageBytes.length);
 
-        // Save image locally first (for debugging and backup)
-        String localImagePath = saveImageLocally(imageBytes, roomId, prompt);
-        logger.info("Image saved locally at: {}", localImagePath);
+        // Step 2: Upload the image bytes directly to Supabase
+        String imageUrl = uploadToSupabaseStorage(imageBytes, roomId);
+        logger.info("Image uploaded to Supabase Storage at URL: {}", imageUrl);
 
-        // Try to upload to Supabase, but don't fail the entire process if it fails
-        String imageUrl;
-        try {
-            imageUrl = uploadToSupabaseStorage(imageBytes, roomId);
-            logger.info("Image uploaded to Supabase Storage at URL: {}", imageUrl);
-        } catch (Exception e) {
-            logger.error("Failed to upload to Supabase, using local path as fallback", e);
-            // Use local file path as fallback (you can serve this via a local endpoint later)
-            imageUrl = "local://" + localImagePath;
-        }
-
+        // Step 3: Save the panel metadata to the database
         Panel newPanel = new Panel();
         newPanel.setPrompt(prompt);
         newPanel.setRoomId(roomId);
@@ -70,63 +56,34 @@ public class PanelService {
         return savedPanel;
     }
 
-    private byte[] callHuggingFaceImageApi(String prompt) {
-        logger.info("Calling Hugging Face API with JSON payload...");
-        String sanitizedPrompt = prompt.replace("\"", "\\\"");
-        String jsonPayload = "{\"inputs\": \"" + sanitizedPrompt + "\"}";
+    private byte[] callPollinationsImageApi(String prompt) {
+        // The base URL for the Pollinations image generation API
+        String baseUrl = "https://image.pollinations.ai/prompt/";
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setAccept(java.util.List.of(MediaType.IMAGE_JPEG)); // Set specific Accept header for image
-        headers.setBearerAuth(apiConfig.huggingFace().token());
-
-        HttpEntity<String> requestEntity = new HttpEntity<>(jsonPayload, headers);
-
-        ResponseEntity<byte[]> response = restTemplate.postForEntity(
-                apiConfig.huggingFace().url(),
-                requestEntity,
-                byte[].class
-        );
-
-        return response.getBody();
-    }
-
-    private String saveImageLocally(byte[] imageBytes, UUID roomId, String prompt) {
         try {
-            // Create images directory if it doesn't exist
-            Path imagesDir = Path.of("generated-images");
-            Files.createDirectories(imagesDir);
+            // URL-encode the prompt to handle spaces and special characters safely
+            String encodedPrompt = URLEncoder.encode(prompt, StandardCharsets.UTF_8.toString());
 
-            // Create subdirectory for this room
-            Path roomDir = imagesDir.resolve(roomId.toString());
-            Files.createDirectories(roomDir);
+            // Construct the full URL with parameters for image size and to remove the logo
+            String url = UriComponentsBuilder.fromHttpUrl(baseUrl + encodedPrompt)
+                    .queryParam("width", "1024")
+                    .queryParam("height", "1024")
+                    .queryParam("nologo", "true")
+                    .toUriString();
 
-            // Create filename with timestamp and sanitized prompt
-            String sanitizedPrompt = prompt.replaceAll("[^a-zA-Z0-9\\s]", "")
-                    .replaceAll("\\s+", "_")
-                    .substring(0, Math.min(50, prompt.length()));
-            String filename = System.currentTimeMillis() + "_" + sanitizedPrompt + ".jpg";
-            Path imagePath = roomDir.resolve(filename);
+            logger.info("Calling Pollinations API: {}", url);
 
-            // Convert bytes to BufferedImage and save
-            ByteArrayInputStream bis = new ByteArrayInputStream(imageBytes);
-            BufferedImage image = ImageIO.read(bis);
+            // Make a simple GET request and get the image bytes directly
+            byte[] imageBytes = restTemplate.getForObject(url, byte[].class);
 
-            if (image == null) {
-                throw new RuntimeException("Could not read image from bytes");
+            if (imageBytes == null || imageBytes.length == 0) {
+                throw new RuntimeException("Received empty or null image response from Pollinations API");
             }
+            return imageBytes;
 
-            // Save the image
-            ImageIO.write(image, "jpg", imagePath.toFile());
-
-            logger.info("Image saved locally: {} ({}x{} pixels)",
-                    imagePath.toAbsolutePath(), image.getWidth(), image.getHeight());
-
-            return imagePath.toAbsolutePath().toString();
-
-        } catch (IOException e) {
-            logger.error("Error saving image locally", e);
-            throw new RuntimeException("Error saving image locally", e);
+        } catch (Exception e) {
+            logger.error("Error calling Pollinations API", e);
+            throw new RuntimeException("Error generating image via Pollinations API", e);
         }
     }
 
@@ -136,137 +93,34 @@ public class PanelService {
         String uploadPath = "/storage/v1/object/" + bucketName + "/" + fileName;
         String fullUrl = apiConfig.supabase().url() + uploadPath;
 
-        Path tempFile = null;
-
         try {
-            // Step 1: Convert bytes to BufferedImage and save as temp file
-            logger.info("Converting bytes to image file for upload...");
-            ByteArrayInputStream bis = new ByteArrayInputStream(imageBytes);
-            BufferedImage image = ImageIO.read(bis);
+            logger.info("Uploading image to Supabase: {}", fullUrl);
 
-            if (image == null) {
-                throw new RuntimeException("Could not read image from bytes");
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.IMAGE_JPEG);
+            headers.setBearerAuth(apiConfig.supabase().key());
+            headers.set("apikey", apiConfig.supabase().key());
+            headers.set("x-upsert", "true");
+            headers.setContentLength(imageBytes.length);
+
+            HttpEntity<byte[]> requestEntity = new HttpEntity<>(imageBytes, headers);
+
+            ResponseEntity<String> response = restTemplate.postForEntity(
+                    fullUrl,
+                    requestEntity,
+                    String.class
+            );
+
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new RuntimeException("Upload failed with status: " + response.getStatusCode() + " and body: " + response.getBody());
             }
 
-            // Create temp file
-            tempFile = Files.createTempFile("panel-upload-", ".jpg");
-            logger.info("Created temp file for upload: {}", tempFile.toString());
+            logger.info("Successfully uploaded to Supabase. Status: {}", response.getStatusCode());
+            return fullUrl;
 
-            // Write image to temp file
-            ImageIO.write(image, "jpg", tempFile.toFile());
-            logger.info("Successfully wrote image to temp file. Size: {} bytes", Files.size(tempFile));
-
-            // Step 2: Upload the temp file (try both methods)
-            return uploadFileToSupabase(tempFile, fullUrl, imageBytes);
-
-        } catch (IOException e) {
-            logger.error("Error creating or writing temp file for upload", e);
-            throw new RuntimeException("Error processing image file for upload", e);
-        } finally {
-            // Clean up temp file
-            if (tempFile != null) {
-                try {
-                    Files.deleteIfExists(tempFile);
-                    logger.info("Cleaned up upload temp file: {}", tempFile.toString());
-                } catch (IOException e) {
-                    logger.warn("Could not delete upload temp file: {}", tempFile.toString(), e);
-                }
-            }
+        } catch (Exception e) {
+            logger.error("Error uploading image to Supabase Storage", e);
+            throw new RuntimeException("Error uploading image to storage", e);
         }
-    }
-
-    private String uploadFileToSupabase(Path tempFile, String fullUrl, byte[] originalBytes) {
-        int maxRetries = 2;
-        Exception lastException = null;
-
-        // Try Method 1: Direct byte array upload
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                logger.info("Trying direct byte upload (attempt {}/{}): {}", attempt, maxRetries, fullUrl);
-
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.IMAGE_JPEG);
-                headers.setBearerAuth(apiConfig.supabase().key());
-                headers.set("apikey", apiConfig.supabase().key());
-                headers.set("x-upsert", "true");
-                headers.setContentLength(originalBytes.length);
-
-                HttpEntity<byte[]> requestEntity = new HttpEntity<>(originalBytes, headers);
-
-                ResponseEntity<String> response = restTemplate.postForEntity(
-                        fullUrl,
-                        requestEntity,
-                        String.class
-                );
-
-                if (response.getStatusCode().is2xxSuccessful()) {
-                    logger.info("Successfully uploaded via direct bytes on attempt {}. Status: {}", attempt, response.getStatusCode());
-                    return fullUrl;
-                } else {
-                    throw new RuntimeException("Upload failed with status: " + response.getStatusCode());
-                }
-
-            } catch (Exception e) {
-                lastException = e;
-                logger.warn("Direct byte upload attempt {} failed: {}", attempt, e.getMessage());
-
-                if (attempt < maxRetries) {
-                    try {
-                        Thread.sleep(2000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Try Method 2: Multipart file upload
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                logger.info("Trying multipart file upload (attempt {}/{}): {}", attempt, maxRetries, fullUrl);
-
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-                headers.setBearerAuth(apiConfig.supabase().key());
-                headers.set("apikey", apiConfig.supabase().key());
-                headers.set("x-upsert", "true");
-
-                FileSystemResource fileResource = new FileSystemResource(tempFile.toFile());
-
-                MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-                body.add("file", fileResource);
-
-                HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
-
-                ResponseEntity<String> response = restTemplate.postForEntity(
-                        fullUrl,
-                        requestEntity,
-                        String.class
-                );
-
-                if (response.getStatusCode().is2xxSuccessful()) {
-                    logger.info("Successfully uploaded via multipart on attempt {}. Status: {}", attempt, response.getStatusCode());
-                    return fullUrl;
-                } else {
-                    throw new RuntimeException("Upload failed with status: " + response.getStatusCode());
-                }
-
-            } catch (Exception e) {
-                lastException = e;
-                logger.warn("Multipart upload attempt {} failed: {}", attempt, e.getMessage());
-
-                if (attempt < maxRetries) {
-                    try {
-                        Thread.sleep(2000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
-        }
-
-        throw new RuntimeException("Error uploading file to storage after trying both methods", lastException);
     }
 }
