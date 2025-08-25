@@ -1,8 +1,9 @@
 package com.storyweaver.api.panel;
 
-import com.storyweaver.api.room.Room; // Import the Room class
+import com.storyweaver.api.room.Room;
 import jakarta.persistence.*;
 import lombok.Data;
+import org.hibernate.annotations.CreationTimestamp; // Import this
 import java.time.Instant;
 import java.util.UUID;
 
@@ -15,7 +16,8 @@ public class Panel {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "created_at", updatable = false, insertable = false)
+    @CreationTimestamp // Add this annotation
+    @Column(name = "created_at", updatable = false)
     private Instant createdAt;
 
     private String prompt;
@@ -23,7 +25,6 @@ public class Panel {
     @Column(name = "image_url")
     private String imageUrl;
 
-    // This defines the foreign key column
     @Column(name = "room_id")
     private UUID roomId;
 

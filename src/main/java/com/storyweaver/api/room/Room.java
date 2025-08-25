@@ -2,6 +2,7 @@ package com.storyweaver.api.room;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import org.hibernate.annotations.CreationTimestamp; // Import this
 import java.time.Instant;
 import java.util.UUID;
 
@@ -14,8 +15,7 @@ public class Room {
     @GeneratedValue(strategy = GenerationType.AUTO)
     private UUID id;
 
-    @Column(name = "created_at", updatable = false, insertable = false)
+    @CreationTimestamp // Add this annotation
+    @Column(name = "created_at", updatable = false)
     private Instant createdAt;
-
-    // You can add other properties like a room name or description later
 }
