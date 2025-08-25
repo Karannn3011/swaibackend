@@ -13,9 +13,11 @@ import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
+import reactor.netty.tcp.TcpClient; // Import TcpClient
 
 import java.time.Duration;
 import java.util.UUID;
+import io.netty.channel.ChannelOption; // Import ChannelOption
 
 @Service
 public class PanelService {
@@ -31,9 +33,12 @@ public class PanelService {
         this.panelRepository = panelRepository;
         this.apiConfig = apiConfig;
 
+        // --- Create a robust HttpClient configuration for both clients ---
         HttpClient httpClient = HttpClient.create()
-                .responseTimeout(Duration.ofSeconds(90));
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 30000) // 30-second connection timeout
+                .responseTimeout(Duration.ofSeconds(90)); // 90-second response timeout
 
+        // --- Apply the same configuration to both WebClients ---
         this.huggingFaceWebClient = WebClient.builder()
                 .baseUrl(apiConfig.huggingFace().url())
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
@@ -42,11 +47,13 @@ public class PanelService {
 
         this.supabaseWebClient = WebClient.builder()
                 .baseUrl(apiConfig.supabase().url())
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiConfig.supabase().key())
                 .defaultHeader("apikey", apiConfig.supabase().key())
                 .build();
     }
 
+    // ... (createPanel, callHuggingFaceImageApi, and uploadToSupabaseStorage methods remain the same)
     public Panel createPanel(String prompt, UUID roomId) {
         logger.info("Generating image for prompt: '{}'", prompt);
 
@@ -67,11 +74,14 @@ public class PanelService {
     }
 
     private byte[] callHuggingFaceImageApi(String prompt) {
-        logger.info("Calling Hugging Face API...");
+        logger.info("Calling Hugging Face API with JSON payload...");
+        String sanitizedPrompt = prompt.replace("\"", "\\\"");
+        String jsonPayload = "{\"inputs\": \"" + sanitizedPrompt + "\"}";
+
         return huggingFaceWebClient.post()
                 .uri("")
-                .contentType(MediaType.TEXT_PLAIN) // <-- THE FIX IS HERE
-                .body(Mono.just(prompt), String.class)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Mono.just(jsonPayload), String.class)
                 .retrieve()
                 .bodyToMono(byte[].class)
                 .block();
@@ -87,6 +97,7 @@ public class PanelService {
                     .uri(uploadPath)
                     .contentType(MediaType.IMAGE_JPEG)
                     .header("x-upsert", "true")
+                    .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(imageBytes.length))
                     .body(BodyInserters.fromValue(imageBytes))
                     .retrieve()
                     .toBodilessEntity()
