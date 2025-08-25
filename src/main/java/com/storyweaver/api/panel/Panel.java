@@ -1,5 +1,6 @@
 package com.storyweaver.api.panel;
 
+import com.storyweaver.api.room.Room; // Import the Room class
 import jakarta.persistence.*;
 import lombok.Data;
 import java.time.Instant;
@@ -22,6 +23,7 @@ public class Panel {
     @Column(name = "image_url")
     private String imageUrl;
 
+    // This defines the foreign key column
     @Column(name = "room_id")
     private UUID roomId;
 

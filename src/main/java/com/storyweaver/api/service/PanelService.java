@@ -15,7 +15,6 @@ import java.util.UUID;
 @Service
 public class PanelService {
 
-    // --- TEMPORARY DEBUGGING CHANGE: Added a logger ---
     private static final Logger logger = LoggerFactory.getLogger(PanelService.class);
 
     private final PanelRepository panelRepository;
@@ -31,36 +30,52 @@ public class PanelService {
     }
 
     public Panel createPanel(String prompt, UUID roomId) {
-        // --- TEMPORARY DEBUGGING CHANGE: We only call the API and log the result ---
-        logger.info("Attempting to call lightweight debugging model...");
-        callHuggingFaceTextApi(prompt);
-        logger.info("API call successful. The rest of the logic is skipped for this test.");
+        logger.info("Generating image for prompt: '{}'", prompt);
 
-        // The rest of the logic is disabled for this test.
-        // byte[] imageBytes = ...
-        // uploadToSupabaseStorage(...)
-        // panelRepository.save(...)
+        // 1. Call the Hugging Face API to get the image bytes
+        byte[] imageBytes = callHuggingFaceImageApi(prompt);
+        logger.info("Successfully received image bytes from Hugging Face.");
 
-        return null; // We return null because we are not creating a panel in this test.
+        // 2. Upload the image to Supabase Storage
+        //    (You will need to implement the logic for this part)
+        //    For now, we'll use a placeholder URL.
+        String imageUrl = uploadToSupabaseStorage(imageBytes, roomId);
+        logger.info("Image uploaded to Supabase Storage at URL: {}", imageUrl);
+
+        // 3. Save the new panel to the database
+        Panel newPanel = new Panel();
+        newPanel.setPrompt(prompt);
+        newPanel.setRoomId(roomId);
+        newPanel.setImageUrl(imageUrl);
+        Panel savedPanel = panelRepository.save(newPanel);
+
+        logger.info("New panel with ID {} saved to the database.", savedPanel.getId());
+        return savedPanel;
     }
 
-    // --- TEMPORARY DEBUGGING CHANGE: This method now expects a String (JSON) response, not bytes ---
-    private void callHuggingFaceTextApi(String prompt) {
+    private byte[] callHuggingFaceImageApi(String prompt) {
         logger.info("Calling HF with URL={} and token length={}",
                 apiConfig.huggingFace().url(),
                 apiConfig.huggingFace().token().length());
 
-        String response = webClient.post()
-                .uri(apiConfig.huggingFace().url()) // should be full model URL
+        return webClient.post()
+                .uri(apiConfig.huggingFace().url())
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiConfig.huggingFace().token())
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("{\"inputs\": \"" + prompt + "\"}")
                 .retrieve()
-                .bodyToMono(String.class)
+                .bodyToMono(byte[].class)
                 .block();
+    }
 
-
-        logger.info("Successfully received response from Hugging Face: {}", response);
-
+    /**
+     * Placeholder for the Supabase Storage upload logic.
+     * You will need to implement this method to upload the image bytes
+     * to your Supabase project and return the public URL.
+     */
+    private String uploadToSupabaseStorage(byte[] imageBytes, UUID roomId) {
+        // TODO: Implement the logic to upload the image to Supabase Storage.
+        // For now, returning a placeholder.
+        return "https://example.com/placeholder.jpg";
     }
 }
