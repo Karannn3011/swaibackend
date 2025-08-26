@@ -10,4 +10,6 @@ import java.util.UUID;
 public interface PanelRepository extends JpaRepository<Panel, Long> {
 
     List<Panel> findByRoomIdOrderByCreatedAtAsc(UUID roomId);
+
+    List<Panel> findTop3ByRoomIdOrderByCreatedAtDesc(UUID roomId);
 }

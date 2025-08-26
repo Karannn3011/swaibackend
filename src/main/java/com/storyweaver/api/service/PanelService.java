@@ -19,8 +19,10 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class PanelService {
@@ -47,8 +49,8 @@ public class PanelService {
         this.panelRepository = panelRepository;
         this.apiConfig = apiConfig;
         this.restTemplate = restTemplateBuilder
-                .setConnectTimeout(Duration.ofSeconds(60))
-                .setReadTimeout(Duration.ofSeconds(120))
+                .connectTimeout(Duration.ofSeconds(60))
+                .readTimeout(Duration.ofSeconds(120))
                 .build();
         this.roomRepository = roomRepository;
         this.roomMembershipRepository = roomMembershipRepository;
@@ -61,24 +63,39 @@ public class PanelService {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new RuntimeException("Room not found"));
 
-        // 1. Check if it's the user's turn
         if (!room.getCurrentTurnUserId().equals(currentUserId)) {
             throw new RuntimeException("It's not your turn!");
         }
 
-        // ... (image generation and upload logic remains the same)
-        byte[] imageBytes = callPollinationsImageApi(prompt);
+        List<Panel> recentPanels = panelRepository.findTop3ByRoomIdOrderByCreatedAtDesc(roomId);
+        Collections.reverse(recentPanels);
+        List<String> previousPrompts = recentPanels.stream()
+                .map(Panel::getPrompt)
+                .collect(Collectors.toList());
+
+        String finalPrompt;
+        // ** THIS IS THE NEW STYLE SUFFIX **
+        String styleSuffix = ", in the style of a graphic novel, comic book art, vibrant colors, detailed line work";
+
+        if (previousPrompts.isEmpty()) {
+            finalPrompt = prompt + styleSuffix; // Add style to the first panel
+        } else {
+            String contextSummary = generateStoryContext(previousPrompts);
+            finalPrompt = contextSummary + ", " + prompt + styleSuffix; // Add style to subsequent panels
+        }
+
+        logger.info("Generated final prompt with context: '{}'", finalPrompt);
+
+        byte[] imageBytes = callPollinationsImageApi(finalPrompt);
         String imageUrl = uploadToSupabaseStorage(imageBytes, roomId);
 
-        // 2. Create and save the new panel
         Panel newPanel = new Panel();
-        newPanel.setPrompt(prompt);
+        newPanel.setPrompt(prompt); // Save the original, short prompt
         newPanel.setRoomId(roomId);
         newPanel.setImageUrl(imageUrl);
         newPanel.setAuthorId(currentUserId);
         Panel savedPanel = panelRepository.save(newPanel);
 
-        // 3. Advance the turn to the next user
         advanceTurn(room);
 
         return savedPanel;
@@ -173,6 +190,35 @@ public class PanelService {
         } catch (Exception e) {
             logger.error("Error uploading image to Supabase Storage", e);
             throw new RuntimeException("Error uploading image to storage", e);
+        }
+    }
+    public String generateStoryContext(List<String> previousPrompts) {
+        String storySoFar = String.join(". ", previousPrompts);
+        String summaryPrompt = "In one short descriptive phrase, summarize this story: " + storySoFar;
+        logger.info("Sending prompt for summary: '{}'", summaryPrompt);
+
+        // ** FIX: Use the correct base URL for text generation **
+        String textApiBaseUrl = "https://text.pollinations.ai/prompt/";
+
+        try {
+            // The text API doesn't require a specific model parameter, it's simpler
+            String encodedPrompt = URLEncoder.encode(summaryPrompt, StandardCharsets.UTF_8.toString());
+            String url = textApiBaseUrl + encodedPrompt;
+
+            // The response will be plain text
+            String summary = restTemplate.getForObject(url, String.class);
+
+            if (summary == null || summary.trim().isEmpty()) {
+                return String.join(", ", previousPrompts); // Fallback to simple concatenation
+            }
+
+            // Clean up the summary
+            return summary.trim().replace("\"", "");
+
+        } catch (Exception e) {
+            logger.error("Failed to generate story context, falling back to simple concatenation.", e);
+            // If the text generation fails, we fall back to the simpler method
+            return String.join(", ", previousPrompts);
         }
     }
 }

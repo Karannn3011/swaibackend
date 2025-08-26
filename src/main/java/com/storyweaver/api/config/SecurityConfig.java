@@ -38,7 +38,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/rooms", "/api/panels", "/api/rooms/*/join", "/api/rooms/join/*").authenticated()
 
                         // 3. Allow specific GET requests for authenticated users (THIS IS THE FIX)
-                        .requestMatchers(HttpMethod.GET, "/api/rooms/*", "/api/panels/room/*").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/rooms/*", "/api/panels/room/*", "/api/panels/*").authenticated()
 
                         // 4. Secure all other requests as a fallback
                         .anyRequest().authenticated()

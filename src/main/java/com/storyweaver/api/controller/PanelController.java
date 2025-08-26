@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List; // Import
+import java.util.Map;
 import java.util.UUID; // Import
 
 @RestController
@@ -35,5 +36,15 @@ public class PanelController {
     public ResponseEntity<List<Panel>> getPanelsForRoom(@PathVariable UUID roomId) {
         List<Panel> panels = panelRepository.findByRoomIdOrderByCreatedAtAsc(roomId);
         return ResponseEntity.ok(panels);
+    }
+
+    @PostMapping("/context")
+    public ResponseEntity<Map<String, String>> getStoryContext(@RequestBody Map<String, List<String>> payload) {
+        List<String> prompts = payload.get("prompts");
+        if (prompts == null || prompts.isEmpty()) {
+            return ResponseEntity.badRequest().build();
+        }
+        String summary = panelService.generateStoryContext(prompts);
+        return ResponseEntity.ok(Map.of("summary", summary));
     }
 }
