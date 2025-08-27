@@ -193,32 +193,44 @@ public class PanelService {
         }
     }
     public String generateStoryContext(List<String> previousPrompts) {
-        String storySoFar = String.join(". ", previousPrompts);
-        String summaryPrompt = "In one short descriptive phrase, summarize this story: " + storySoFar;
-        logger.info("Sending prompt for summary: '{}'", summaryPrompt);
+        if (previousPrompts.isEmpty()) {
+            return ""; // Should not happen based on calling logic, but safe to have.
+        }
 
-        // ** FIX: Use the correct base URL for text generation **
+        String storySoFar = String.join(". ", previousPrompts);
+
+        // ** NEW DYNAMIC PROMPT LOGIC **
+        // Let's set a base of 20 words per panel to make the summary grow.
+        int wordCount = previousPrompts.size() * 20;
+
+        String summaryPrompt = String.format(
+                "Summarize the following events in a short, connected paragraph of about %d words: %s",
+                wordCount,
+                storySoFar
+        );
+
+        logger.info("Sending prompt for growing summary: '{}'", summaryPrompt);
+
         String textApiBaseUrl = "https://text.pollinations.ai/prompt/";
 
         try {
-            // The text API doesn't require a specific model parameter, it's simpler
             String encodedPrompt = URLEncoder.encode(summaryPrompt, StandardCharsets.UTF_8.toString());
             String url = textApiBaseUrl + encodedPrompt;
 
-            // The response will be plain text
             String summary = restTemplate.getForObject(url, String.class);
 
             if (summary == null || summary.trim().isEmpty()) {
-                return String.join(", ", previousPrompts); // Fallback to simple concatenation
+                // Fallback to a simple concatenation if the AI fails
+                return storySoFar;
             }
 
-            // Clean up the summary
             return summary.trim().replace("\"", "");
 
         } catch (Exception e) {
-            logger.error("Failed to generate story context, falling back to simple concatenation.", e);
-            // If the text generation fails, we fall back to the simpler method
-            return String.join(", ", previousPrompts);
+            logger.error("Failed to generate growing story context, falling back to simple concatenation.", e);
+            // If the text generation fails, our fallback is to just join the prompts together.
+            return storySoFar;
         }
     }
+
 }

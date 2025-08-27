@@ -39,7 +39,7 @@ public class SecurityConfig {
 
                         // 3. Allow specific GET requests for authenticated users (THIS IS THE FIX)
                         .requestMatchers(HttpMethod.GET, "/api/rooms/*", "/api/panels/room/*", "/api/panels/*").authenticated()
-
+                        .requestMatchers("/api/users/**").authenticated()
                         // 4. Secure all other requests as a fallback
                         .anyRequest().authenticated()
                 )
@@ -51,7 +51,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList("http://localhost:3000", "http://localhost:5173"));
+        configuration.setAllowedOrigins(Arrays.asList("http://localhost:3000", "http://localhost:5173", "https://storyweaver-ai-umber.vercel.app"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "x-upsert", "apikey"));
         configuration.setAllowCredentials(true);
