@@ -16,6 +16,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 
 import com.storyweaver.api.config.ApiConfig;
 import com.storyweaver.api.room.Room;
@@ -33,6 +35,12 @@ public class RoomCleanupService {
         this.roomRepository = roomRepository;
         this.apiConfig = apiConfig;
         this.restTemplate = restTemplateBuilder.build();
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void runCleanupOnStartup() {
+        logger.info("Application started. Running initial stale room cleanup...");
+        cleanupStaleRooms();
     }
 
     @Transactional
