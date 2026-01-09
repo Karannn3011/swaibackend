@@ -4,7 +4,9 @@ import com.storyweaver.api.config.ApiConfig;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
+@EnableScheduling
 @EnableConfigurationProperties(ApiConfig.class)
 @SpringBootApplication
 public class StoryweaverApiApplication {

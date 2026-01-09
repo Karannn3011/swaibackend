@@ -24,4 +24,13 @@ public class Room {
 
     @Column(name = "current_turn_user_id") // ** ADD THIS LINE **
     private UUID currentTurnUserId;        // ** ADD THIS LINE **
+
+
+    @Column(name = "last_activity_at")
+    private java.time.Instant lastActivityAt;
+
+    @PrePersist
+    protected void onCreate() {
+    this.lastActivityAt = java.time.Instant.now();
+    }
 }

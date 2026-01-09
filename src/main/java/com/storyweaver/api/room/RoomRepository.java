@@ -6,7 +6,12 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 import java.util.UUID;
 
-@Repository
+import java.time.Instant;
+import java.util.List;
+
 public interface RoomRepository extends JpaRepository<Room, UUID> {
     Optional<Room> findByCode(String code);
+    
+    // Find rooms where last_activity_at is older than the threshold
+    List<Room> findByLastActivityAtBefore(Instant threshold);
 }

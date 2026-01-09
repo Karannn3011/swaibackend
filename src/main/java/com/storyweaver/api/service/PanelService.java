@@ -44,8 +44,7 @@ public class PanelService {
             RestTemplateBuilder restTemplateBuilder,
             RoomRepository roomRepository,
             RoomMembershipRepository roomMembershipRepository,
-            AuthHelper authHelper
-    ) {
+            AuthHelper authHelper) {
         this.panelRepository = panelRepository;
         this.apiConfig = apiConfig;
         this.restTemplate = restTemplateBuilder
@@ -95,9 +94,10 @@ public class PanelService {
         newPanel.setImageUrl(imageUrl);
         newPanel.setAuthorId(currentUserId);
         Panel savedPanel = panelRepository.save(newPanel);
-
+        room.setLastActivityAt(java.time.Instant.now());
         advanceTurn(room);
-
+        logger.info("Updating room {} last activity to: {}", room.getId(), room.getLastActivityAt());
+        roomRepository.save(room);
         return savedPanel;
     }
 
@@ -123,7 +123,6 @@ public class PanelService {
         roomRepository.save(room);
         logger.info("Advanced turn in room {} to user {}", room.getId(), nextUserId);
     }
-
 
     private byte[] callPollinationsImageApi(String prompt) {
         // The base URL for the Pollinations image generation API
@@ -177,11 +176,11 @@ public class PanelService {
             ResponseEntity<String> response = restTemplate.postForEntity(
                     fullUrl,
                     requestEntity,
-                    String.class
-            );
+                    String.class);
 
             if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new RuntimeException("Upload failed with status: " + response.getStatusCode() + " and body: " + response.getBody());
+                throw new RuntimeException(
+                        "Upload failed with status: " + response.getStatusCode() + " and body: " + response.getBody());
             }
 
             logger.info("Successfully uploaded to Supabase. Status: {}", response.getStatusCode());
@@ -192,6 +191,7 @@ public class PanelService {
             throw new RuntimeException("Error uploading image to storage", e);
         }
     }
+
     public String generateStoryContext(List<String> previousPrompts) {
         if (previousPrompts.isEmpty()) {
             return ""; // Should not happen based on calling logic, but safe to have.
@@ -206,8 +206,7 @@ public class PanelService {
         String summaryPrompt = String.format(
                 "Summarize the following events in a short, connected paragraph of about %d words: %s",
                 wordCount,
-                storySoFar
-        );
+                storySoFar);
 
         logger.info("Sending prompt for growing summary: '{}'", summaryPrompt);
 
@@ -228,7 +227,8 @@ public class PanelService {
 
         } catch (Exception e) {
             logger.error("Failed to generate growing story context, falling back to simple concatenation.", e);
-            // If the text generation fails, our fallback is to just join the prompts together.
+            // If the text generation fails, our fallback is to just join the prompts
+            // together.
             return storySoFar;
         }
     }
